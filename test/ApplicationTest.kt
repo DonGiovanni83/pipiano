@@ -1,5 +1,6 @@
-package ch.fabio.projects.
+package ch.fabio.projects
 
+import ch.fabio.projects.main.module
 import io.ktor.application.*
 import io.ktor.response.*
 import io.ktor.request.*
