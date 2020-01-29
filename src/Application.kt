@@ -7,21 +7,29 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.apache.Apache
 import io.ktor.html.respondHtml
 import io.ktor.http.ContentType
-import io.ktor.http.Parameters
 import io.ktor.http.content.resources
 import io.ktor.http.content.static
+import io.ktor.network.selector.ActorSelectorManager
+import io.ktor.network.sockets.aSocket
+import io.ktor.network.sockets.openWriteChannel
 import io.ktor.request.receive
-import io.ktor.request.receiveParameters
 import io.ktor.response.respondText
 import io.ktor.routing.get
 import io.ktor.routing.post
 import io.ktor.routing.routing
+import io.ktor.util.KtorExperimentalAPI
+import io.ktor.util.url
+import kotlinx.coroutines.*
+import kotlinx.coroutines.io.writeStringUtf8
 import kotlinx.css.*
+import kotlinx.css.Float
 import kotlinx.html.*
-import org.intellij.lang.annotations.JdkConstants
+import java.net.InetSocketAddress
+
 
 fun main(args: Array<String>): Unit = io.ktor.server.netty.EngineMain.main(args)
 
+@KtorExperimentalAPI
 @Suppress("unused") // Referenced in application.conf
 @kotlin.jvm.JvmOverloads
 fun Application.module(testing: Boolean = false) {
@@ -30,10 +38,6 @@ fun Application.module(testing: Boolean = false) {
 
     routing {
         get("/") {
-            call.respondText("HELLO WORLD!", contentType = ContentType.Text.Plain)
-        }
-
-        get("/html-dsl") {
             call.respondHtml {
                 head {
                     link(rel = "stylesheet", href = "/styles.css", type = "text/css")
@@ -44,7 +48,7 @@ fun Application.module(testing: Boolean = false) {
                     script {
                         src = "/static/api-calls.js"
                     }
-                    img(src = "/static/background.png")
+                    img(classes = "background", src = "/static/background.png")
                     div("main_container") {
                         h1 { +"Pi Piano" }
                         div("button_container") {
@@ -57,11 +61,13 @@ fun Application.module(testing: Boolean = false) {
                                 +"Organ"
                             }
                             button(classes = "selection_button") {
-                                onClick = "send_sound_call('jazz_organ')"
-                                +"Jazz Organ"
+                                onClick = "send_sound_call('e_piano')"
+                                +"E-Piano"
                             }
                         }
                     }
+                    img(classes = "power_off_button shutdown", src = "/static/shutdown.png")
+
                 }
             }
         }
@@ -70,7 +76,6 @@ fun Application.module(testing: Boolean = false) {
             call.respondCss {
 
                 body {
-
                     margin = "0 0 0 0"
                 }
 
@@ -80,11 +85,19 @@ fun Application.module(testing: Boolean = false) {
                     fontSize = 8.em
                     color = Color("#ffdede")
                     margin = "80px 0 60px 0"
+                    fontWeight = FontWeight("550")
+                    userSelect = UserSelect.none
                 }
-                img {
+                rule("img.background") {
                     height = 480.px
                     width = 800.px
                     position = Position.absolute
+                }
+                rule("img.shutdown") {
+                    height = 52.px
+                    width = 52.px
+                    float = Float.right
+                    margin = "12px"
                 }
                 p {
                     fontSize = 2.em
@@ -93,7 +106,7 @@ fun Application.module(testing: Boolean = false) {
                 button {
                     border = "4px solid"
                     borderRadius = 16.px
-                    borderColor = Color("#FFC0CC")
+                    borderColor = Color("#9F606C")
                     backgroundColor = Color.transparent
 
                     fontFamily = "GreatVibes"
@@ -102,6 +115,12 @@ fun Application.module(testing: Boolean = false) {
                     color = Color("#ffdede")
                 }
 
+                rule("button:focus") {
+                    outline = Outline.none
+                    border = "4px solid"
+                    borderRadius = 16.px
+                    borderColor = Color("#FFC0CC")
+                }
                 rule("button.selection_button") {
                     padding = "30px"
                     margin = "0 30px 0 30px"
@@ -114,26 +133,54 @@ fun Application.module(testing: Boolean = false) {
                     position = Position.absolute
                     height = 480.px
                     width = 800.px
-                    backgroundColor = blackAlpha(0.2)
+                    backgroundColor = blackAlpha(0.15)
                 }
             }
         }
 
         post("/change_sound") {
             when (call.receive<String>()) {
-                "piano" -> println("Got Piano")
-                "organ" -> println("Got Organ")
-                "jazz_organ" -> println("Got Jazz Organ")
-                else -> print("Invalid sound name")
+                "piano" -> {
+                    println("Got Piano")
+                    sendFluidSynthCommand("prog 0 1")
+                }
+                "organ" -> {
+                    println("Got Organ")
+                    sendFluidSynthCommand("prog 0 17")
+                }
+                "e_piano" -> {
+                    println("Got E-Piano")
+                    sendFluidSynthCommand("prog 0 4")
+                }
+                "shutdown" -> withContext(Dispatchers.IO) {
+                    Runtime.getRuntime().exec("poweroff")
+                }
+                else -> println("Invalid sound name")
             }
         }
 
-        // Static feature. Try to access `/static/ktor_logo.svg`
+        // Static feature. Access any resource with the /static/ prefix path
         static("/static") {
             resources("static")
         }
     }
 }
+
+@KtorExperimentalAPI
+fun sendFluidSynthCommand(command: String) = runBlocking {
+    val socket =
+        aSocket(ActorSelectorManager(Dispatchers.IO))
+            .tcp()
+            .connect(
+                InetSocketAddress("127.0.0.1", 9800)
+            )
+    val output = socket.openWriteChannel(autoFlush = true)
+
+    output.writeStringUtf8(command)
+
+    socket.dispose()
+}
+
 
 fun FlowOrMetaDataContent.styleCss(builder: CSSBuilder.() -> Unit) {
     style(type = ContentType.Text.CSS.toString()) {
